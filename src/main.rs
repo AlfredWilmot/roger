@@ -8,31 +8,39 @@
 
 use std::thread::{self, JoinHandle};
 
-use tokio::{io::AsyncReadExt, net::TcpListener, runtime::Builder};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    runtime::Builder,
+};
 
 /// some places to go
-enum Location {
-    HOME,
-    CITY,
-    WOODS,
-    BEACH,
-    FIELD,
-    CAFE,
-    SHOP,
-    CATHEDRAL,
-}
+/// (using literal strings for now as these'll be easier to encode/decode than enums)
+const HOME: &str = "HOME";
+const CITY: &str = "CITY";
+const WOODS: &str = "WOODS";
+const BEACH: &str = "BEACH";
+const FIELD: &str = "FIELD";
+const CAFE: &str = "CAFE";
+const SHOP: &str = "SHOP";
+const CATHEDRAL: &str = "CATHEDRAL";
 
 /// some arbitrary travel itinerary
-fn travel_fsm(loc: Location) -> Location {
-    match loc {
-        Location::HOME => Location::CITY,
-        Location::CITY => Location::WOODS,
-        Location::WOODS => Location::BEACH,
-        Location::BEACH => Location::FIELD,
-        Location::FIELD => Location::CAFE,
-        Location::CAFE => Location::SHOP,
-        Location::SHOP => Location::CATHEDRAL,
-        Location::CATHEDRAL => Location::HOME,
+fn travel_fsm(loc: &str) -> &str {
+    // remove trailing newlines
+    match loc.trim() {
+        HOME => CITY,
+        CITY => WOODS,
+        WOODS => BEACH,
+        BEACH => FIELD,
+        FIELD => CAFE,
+        CAFE => SHOP,
+        SHOP => CATHEDRAL,
+        CATHEDRAL => HOME,
+        _ => {
+            println!("Unknown location: '{}'", loc);
+            HOME
+        }
     }
 }
 
@@ -44,26 +52,29 @@ fn server_thread() -> JoinHandle<()> {
         // create a runtime for the server thread
         let server_rt = Builder::new_current_thread().enable_all().build().unwrap();
 
-        // block until a server listening on a port is created
+        // runtime context for the server
         server_rt.block_on(async {
             let server = TcpListener::bind(format!("{}:{}", "0.0.0.0", SERVER_PORT))
                 .await
                 .unwrap();
             // handle multiple client connections
             loop {
-                let (mut sock, _) = server.accept().await.unwrap();
+                let (mut sock, client) = server.accept().await.unwrap();
                 server_rt.spawn(async move {
                     let mut buffer = [0; 1024];
                     'inner: loop {
-                        match sock.read(&mut buffer).await {
+                        let response = match sock.read(&mut buffer).await {
                             Ok(0) => break 'inner,
                             Ok(n) => {
-                                // 1) deserialise the bytes into a Location enum
-                                // 2) pass the parsed Location into the FSM
-                                // 3) serialise and send the result back to the client
+                                let request = &String::from_utf8_lossy(&buffer[..n]).to_string();
+                                print!("{} is at the {}", client, request);
+                                let response = String::from(travel_fsm(request)) + "\n";
+                                print!("Next stop: {}", response);
+                                response
                             }
                             Err(_) => break 'inner,
-                        }
+                        };
+                        sock.write_all(response.as_bytes()).await.unwrap();
                     }
                 });
             }
@@ -73,7 +84,7 @@ fn server_thread() -> JoinHandle<()> {
 
 fn main() {
     // create a runtime for creating client connections in the foreground thread
-    let client_rt = Builder::new_current_thread().enable_all().build().unwrap();
-
-    server_thread().join().unwrap();
+    println!("Creating Server Thread");
+    let server = server_thread();
+    server.join().unwrap();
 }
