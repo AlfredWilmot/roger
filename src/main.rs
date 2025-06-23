@@ -7,13 +7,13 @@
 // (each client sends a random Location and prints the response + the ping delay)
 
 use std::{
-    thread::{self, JoinHandle},
-    time::Duration,
+    error, fmt, net::SocketAddr, thread::{self, JoinHandle}, time::Duration
 };
 
+use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpSocket, TcpStream},
     runtime::Builder,
 };
 
@@ -48,6 +48,89 @@ fn travel_fsm(loc: &str) -> &str {
 }
 
 const SERVER_PORT: u16 = 8080;
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+enum Location {
+    #[default]
+    HOME,
+    CITY,
+    WOODS,
+    BEACH,
+    FIELD,
+    CAFE,
+    SHOP,
+    CATHEDRAL,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+enum Message {
+    Get {loc: Location},
+    Insert {loc: Location},
+    Remove {loc: Location},
+    List,
+    Error {info: String},
+}
+
+/// Custom error derived from those that pertain to Node operations
+#[derive(Debug)]
+pub enum NodeError {
+    Parsing(serde_json::Error),
+    IO(std::io::Error),
+}
+
+impl fmt::Display for NodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+// use default method implementations of the error::Error trait
+impl error::Error for NodeError { }
+
+
+
+struct Node{
+    socket: TcpSocket,
+}
+
+
+impl Node {
+
+    fn new() -> Result<Node, NodeError> {
+        Ok(Node {socket: TcpSocket::new_v4().map_err(NodeError::IO)?})
+    }
+
+    /// Send messages over a stream.
+    /// This is done by creating a two-part payload:
+    /// - the first 4 bytes corresponds to the size of the payload
+    /// - the remainder the the payload is the encoded message
+    async fn transmit(self, dest: SocketAddr, message: &Message) -> Result<(), NodeError> {
+        let mut stream = self.socket.connect(dest).await.map_err(NodeError::IO)?;
+        let json = serde_json::to_string::<Message>(message).map_err(NodeError::Parsing)?;
+        stream.write_all(&(json.len() as u32).to_be_bytes()).await.map_err(NodeError::IO)?;
+        stream.write_all(json.as_bytes()).await.map_err(NodeError::IO)?;
+        Ok(())
+    }
+
+    /// Receive messages from a stream using the existing socket.
+    async fn receive(self, dest: SocketAddr) -> Result<Message, NodeError> {
+
+        let mut stream = self.socket.connect(dest).await.map_err(NodeError::IO)?;
+
+        // read frist 4 bytes to determine the size of the payload
+        let mut length_buffer = [0; 4];
+        stream.read_exact(&mut length_buffer).await.map_err(NodeError::IO)?;
+        let payload_size = u32::from_be_bytes(length_buffer) as usize;
+
+        // read the payload itself
+        let mut payload_buffer = vec![0; payload_size];
+        stream.read_exact(&mut payload_buffer).await.map_err(NodeError::IO)?;
+
+        // decode the payload
+        Ok(serde_json::from_slice(&payload_buffer).map_err(NodeError::Parsing)?)
+    }
+}
+
 
 /// Creates a background thread for the server component
 fn server_thread() -> JoinHandle<()> {
