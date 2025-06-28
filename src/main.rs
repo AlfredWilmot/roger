@@ -56,47 +56,10 @@ fn server_thread() -> JoinHandle<()> {
     })
 }
 
-/// Create a background thread for a new client connection
-fn client_thread() -> JoinHandle<()> {
-    thread::spawn(|| {
-        // create a runtime for this client thread
-        let client_rt = Builder::new_current_thread().enable_all().build().unwrap();
-
-        let mut payload = String::from(HOME);
-
-        // runtime context for the client
-        client_rt.block_on(async move {
-            match TcpStream::connect(format!("{}:{}", "127.0.0.1", SERVER_PORT)).await {
-                Ok(mut client) => {
-                    tokio::time::sleep(Duration::from_millis(2000)).await;
-                    client.writable().await.unwrap();
-                    let mut buffer: [u8; 1024] = [0; 1024];
-                    'inner: loop {
-                        let _ = client.try_write(payload.as_bytes());
-                        payload = match client.read(&mut buffer).await {
-                            Ok(0) => break 'inner,
-                            Ok(n) => String::from_utf8_lossy(&buffer[..n]).to_string(),
-                            Err(_) => break 'inner,
-                        }
-                    }
-                }
-                Err(err) => {
-                    println!("{:?}", err);
-                }
-            }
-        });
-    })
-}
-
 fn main() {
     // create a runtime for creating client connections in the foreground thread
     println!("Creating Server Thread");
     let server = server_thread();
-
-    // create three threads for three unique clients
-    client_thread();
-    client_thread();
-    client_thread();
 
     // exit the main thread when server thread exits
     server.join().unwrap();
