@@ -1,10 +1,9 @@
 use std::time::Duration;
-
 use tokio::net::TcpStream;
 
 static RETRY_DELAY: u64 = 10; //ms
 
-// Someone looking for answers
+// Someone looking for answers and trying to get places
 pub struct Traveller {}
 
 impl Traveller {

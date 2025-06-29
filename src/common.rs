@@ -1,6 +1,6 @@
 use std::fmt::Display;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 use serde::{Deserialize, Serialize};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
 pub static LOCALHOST: &str = "127.0.0.1";
 pub static ALL_INTERFACES: &str = "0.0.0.0";
@@ -19,14 +19,42 @@ pub enum Location {
     CHURCH,
 }
 
-// Actions that a traveller can send to the tour-guide to interact with the itinerary
+// Represents a unit of conversation
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Message {
+    header: Header,
+    data: Payload 
+}
+
+// Contains additional information that's not directly related to the conversation
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Header {}
+
+// The types of payloads that can be sent between travellers and tour-guides
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Payload {
+    Request(Request),
+    Response(Response),
+}
+
+// conversational units that a traveller can send to a tour-guide
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
+    List,
     Put(Location),
     Del(Location),
     Mov(Location, u32),
-    List,
     Current,  // where are we now?
     Next,  // where are we going next?
+}
+
+// conversational units that a tour-guide can send to a traveller
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Response {
+    Success,
+    Failure,
+    List(Vec<Location>),
+    Where(Location)
 }
 
 /// Used to handle all relevant error-states using '?' short-circuiting
@@ -43,11 +71,12 @@ impl Display for Error {
 }
 impl std::error::Error for Error {}
 
+
 /// Transmit data over a TcpStream
 /// the first 4 bytes correspond to the byte-count of the serialized data
-pub async fn transmit(stream: &mut TcpStream, msg: Location) -> Result<(), Error> {
+pub async fn tx(stream: &mut TcpStream, msg: Message) -> Result<(), Error> {
     // try to serialize the payload
-    let content = serde_json::to_string::<Location>(&msg).map_err(Error::Parse)?;
+    let content = serde_json::to_string::<Message>(&msg).map_err(Error::Parse)?;
 
     // tell the receiver how large the payload is
     stream
@@ -69,7 +98,7 @@ pub async fn transmit(stream: &mut TcpStream, msg: Location) -> Result<(), Error
 
 /// Receive data over a TcpStream
 /// assume the byte-count of the data to be deserialized is provided in the first 4 bytes
-pub async fn receive(stream: &mut TcpStream) -> Result<Location, Error> {
+pub async fn rx(stream: &mut TcpStream) -> Result<Message, Error> {
     // 4 bytes encode the payload size
     let mut content_length_buffer: [u8; 4] = [0; 4];
     stream

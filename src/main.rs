@@ -1,11 +1,3 @@
-// TODO:
-//
-// > background thread runs server that listens for locations and responds with
-// where to go next based on the travel_fsm
-//
-// > foreground fsm that creates 100 client connections to the server
-// (each client sends a random Location and prints the response + the ping delay)
-
 use std::{
     error, fmt, net::SocketAddr, thread::{self, JoinHandle}, time::Duration
 };
