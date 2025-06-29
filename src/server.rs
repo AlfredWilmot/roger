@@ -1,6 +1,6 @@
+use crate::common::{ALL_INTERFACES, Error, Message, rx, tx};
 use std::thread::{self, JoinHandle};
 use tokio::{net::TcpListener, runtime::Builder};
-use crate::common::{rx, tx, Error, Message, ALL_INTERFACES};
 
 pub fn travel_guide<T: Clone + Send + 'static>(
     port: u16,
@@ -31,7 +31,7 @@ pub fn travel_guide<T: Clone + Send + 'static>(
                         continue;
                     }
                 };
-               let itinerary = itinerary.clone();
+                let itinerary = itinerary.clone();
                 rt.spawn(async move {
                     match rx(&mut stream).await {
                         Ok(msg) => {

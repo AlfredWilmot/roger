@@ -1,11 +1,14 @@
-use std::fmt::Display;
 use serde::{Deserialize, Serialize};
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+use std::fmt::Display;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 pub static LOCALHOST: &str = "127.0.0.1";
 pub static ALL_INTERFACES: &str = "0.0.0.0";
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
 // All the places the tour-guide knows about
 pub enum Location {
     #[default]
@@ -22,8 +25,29 @@ pub enum Location {
 // Represents a unit of conversation
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
-    header: Header,
-    data: Payload 
+    header: Option<Header>,
+    pub data: Payload,
+}
+
+impl Message {
+    pub fn new(payload: Payload) -> Self {
+        Message {
+            header: None,
+            data: payload,
+        }
+    }
+    pub fn new_response(response: Response) -> Self {
+        Message {
+            header: None,
+            data: Payload::Response(response),
+        }
+    }
+    pub fn new_request(request: Request) -> Self {
+        Message {
+            header: None,
+            data: Payload::Request(request),
+        }
+    }
 }
 
 // Contains additional information that's not directly related to the conversation
@@ -44,17 +68,26 @@ pub enum Request {
     Put(Location),
     Del(Location),
     Mov(Location, u32),
-    Current,  // where are we now?
-    Next,  // where are we going next?
+    Current, // where are we now?
+    Next,    // where are we going next?
 }
 
 // conversational units that a tour-guide can send to a traveller
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     Success,
-    Failure,
+    Failure(Failure),
     List(Vec<Location>),
-    Where(Location)
+    Where(Location),
+    Done,
+}
+
+// what kind of communication break down are we experiencing?
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Failure {
+    InvalidRequest,
+    InvalidResponse,
+    LocationNotOnItinerary,
 }
 
 /// Used to handle all relevant error-states using '?' short-circuiting
@@ -70,7 +103,6 @@ impl Display for Error {
     }
 }
 impl std::error::Error for Error {}
-
 
 /// Transmit data over a TcpStream
 /// the first 4 bytes correspond to the byte-count of the serialized data

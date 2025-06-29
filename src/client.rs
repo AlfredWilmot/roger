@@ -7,7 +7,6 @@ static RETRY_DELAY: u64 = 10; //ms
 pub struct Traveller {}
 
 impl Traveller {
-
     // Try to get the travel-guide's attention
     pub async fn connect(url: &str, port: u16) -> TcpStream {
         let addr = &format!("{}:{}", url, port)[..];

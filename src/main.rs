@@ -1,58 +1,53 @@
-use std::{
-    error, fmt, net::SocketAddr, thread::{self, JoinHandle}, time::Duration
-};
+use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpSocket, TcpStream},
-    runtime::Builder,
+use roger::{
+    common::{Failure, Location, Message, Payload, Request, Response},
+    server::travel_guide,
 };
-
 
 const SERVER_PORT: u16 = 8080;
 
-/// Creates a background thread for the server component
-fn server_thread() -> JoinHandle<()> {
-    thread::spawn(|| {
-        // create a runtime for the server thread
-        let server_rt = Builder::new_current_thread().enable_all().build().unwrap();
-
-        // runtime context for the server
-        server_rt.block_on(async {
-            let server = TcpListener::bind(format!("{}:{}", "0.0.0.0", SERVER_PORT))
-                .await
-                .unwrap();
-            // handle multiple client connections
-            loop {
-                let (mut sock, client) = server.accept().await.unwrap();
-                server_rt.spawn(async move {
-                    let mut buffer = [0; 1024];
-                    'inner: loop {
-                        let response = match sock.read(&mut buffer).await {
-                            Ok(0) => break 'inner,
-                            Ok(n) => {
-                                let request = &String::from_utf8_lossy(&buffer[..n]).to_string();
-                                print!("{} is at the {}", client, request);
-                                let response = String::from(travel_fsm(request)) + "\n";
-                                print!("Next stop: {}", response);
-                                response
-                            }
-                            Err(_) => break 'inner,
-                        };
-                        sock.write_all(response.as_bytes()).await.unwrap();
-                    }
-                });
-            }
-        });
-    })
-}
-
 fn main() {
-    // create a runtime for creating client connections in the foreground thread
-    println!("Creating Server Thread");
-    let server = server_thread();
+    // create and populate the itinerary (with a counter keeping track of the curreng location)
+    let itinerary = Arc::new(Mutex::new((0, Vec::<Location>::new())));
+    itinerary.lock().unwrap().1.append(&mut vec![
+        Location::HOME,
+        Location::CHURCH,
+        Location::WOODS,
+    ]);
 
-    // exit the main thread when server thread exits
-    server.join().unwrap();
+    travel_guide(SERVER_PORT, itinerary, |msg, itin| {
+        // should only be getting messages of the "Request" type
+        let request = match &msg.data {
+            Payload::Request(request) => request,
+            _ => return Message::new_response(Response::Failure(Failure::InvalidRequest)),
+        };
+
+        match request {
+            // Tell the traveller the itinerary
+            Request::List => {
+                let list = itin.lock().unwrap().1.iter().cloned().collect();
+                return Message::new_response(Response::List(list));
+            }
+            Request::Current => {
+                let idx: usize = itin.lock().unwrap().0;
+                if let Some(loc) = itin.lock().unwrap().1.get(idx) {
+                    return Message::new_response(Response::Where(loc.clone()));
+                } else {
+                    return Message::new_response(Response::Failure(
+                        Failure::LocationNotOnItinerary,
+                    ));
+                }
+            }
+            Request::Next => {
+                if let Some(loc) = itin.lock().unwrap().1.get(itin.lock().unwrap().0 + 1) {
+                    itin.lock().unwrap().0 += 1;
+                    return Message::new_response(Response::Where(loc.clone()));
+                } else {
+                    return Message::new_response(Response::Done);
+                }
+            }
+            _ => return Message::new_response(Response::Failure(Failure::InvalidRequest)),
+        };
+    });
 }
